@@ -27,7 +27,8 @@ class PlantStudy(BaseModel):
     location_id: str | None = None
     location_name: str | None = None
     country: str | None = None
-
+    latitude: float | None = None
+    longitude: float | None = None
     trial_id: str | None = None
     trial_name: str | None = None
 
