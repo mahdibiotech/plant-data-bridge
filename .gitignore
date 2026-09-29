@@ -6,3 +6,27 @@ __pycache__/
 target/
 .idea/
 .vscode/
+
+# Python packaging
+*.egg-info/
+dist/
+build/
+
+# Python caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Virtual environments
+.venv/
+venv/
+
+# Java / Maven
+target/
+
+# IDE
+.idea/
+.vscode/
+
+# Environment variables
+.env
