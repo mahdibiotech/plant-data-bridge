@@ -133,6 +133,36 @@ def harvest(
         base_url=base_url,
     )
 
+    # ---------------------------------------------------------
+    # Capability discovery
+    # ---------------------------------------------------------
+
+    try:
+        capabilities = brapi.get_capabilities()
+
+        print("Capabilities")
+        print(f"  studies      : {capabilities['studies']}")
+        print(f"  locations    : {capabilities['locations']}")
+        print(f"  traits       : {capabilities['traits']}")
+        print(f"  variables    : {capabilities['variables']}")
+        print(f"  observations : {capabilities['observations']}")
+        print()
+
+    except RuntimeError as exc:
+
+        logger.warning(
+            "Capability discovery failed: %s",
+            exc,
+        )
+
+        capabilities = {
+            "studies": True,
+            "locations": True,
+            "traits": False,
+            "variables": False,
+            "observations": False,
+        }
+
     fetched = 0
     valid = 0
     rejected = 0
@@ -157,7 +187,14 @@ def harvest(
 
             location = None
 
-            if study.location_id:
+            # -------------------------------------------------
+            # Location enrichment only if supported
+            # -------------------------------------------------
+
+            if (
+                study.location_id
+                and capabilities.get("locations", False)
+            ):
                 try:
                     location = brapi.get_location(
                         study.location_id
@@ -167,6 +204,7 @@ def harvest(
                         enriched_locations += 1
 
                 except RuntimeError as exc:
+
                     failed_locations += 1
 
                     logger.warning(

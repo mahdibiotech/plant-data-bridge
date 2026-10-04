@@ -270,3 +270,44 @@ class BrAPIClient:
                 and page >= total_pages
             ):
                 break
+    def get_serverinfo(self) -> dict:
+        url = f"{self.base_url}/serverinfo"
+
+        logger.info("Fetching BrAPI server capabilities")
+
+        try:
+            response = self.session.get(
+                url,
+                timeout=self.timeout,
+            )
+            response.raise_for_status()
+            return response.json()
+
+        except requests.RequestException as exc:
+            raise RuntimeError(
+                f"Failed to retrieve serverinfo: {exc}"
+            ) from exc
+
+
+    def get_capabilities(self) -> dict[str, bool]:
+        serverinfo = self.get_serverinfo()
+
+        calls = (
+            serverinfo
+            .get("result", {})
+            .get("calls", [])
+        )
+
+        services = {
+            call.get("service")
+            for call in calls
+            if call.get("service")
+        }
+
+        return {
+            "studies": "studies" in services,
+            "locations": "locations/{locationDbId}" in services,
+            "traits": "traits" in services,
+            "variables": "variables" in services,
+            "observations": "observations" in services,
+        }
