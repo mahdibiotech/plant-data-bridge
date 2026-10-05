@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import os
 import time
+
+from datetime import datetime, timezone
+from pathlib import Path
 
 from pydantic import ValidationError
 
@@ -151,6 +155,58 @@ def discover_capabilities(
         return fallback
 
 
+def write_harvest_report(
+    report: dict,
+) -> Path:
+    project_root = (
+        Path(__file__)
+        .resolve()
+        .parents[2]
+    )
+
+    reports_dir = (
+        project_root
+        / "reports"
+    )
+
+    reports_dir.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    timestamp = datetime.now(
+        timezone.utc
+    ).strftime(
+        "%Y%m%dT%H%M%SZ"
+    )
+
+    safe_source = (
+        str(report["source"])
+        .replace(" ", "_")
+        .replace("/", "_")
+    )
+
+    report_path = (
+        reports_dir
+        / f"{safe_source}_{timestamp}.json"
+    )
+
+    with report_path.open(
+        "w",
+        encoding="utf-8",
+    ) as handle:
+        json.dump(
+            report,
+            handle,
+            indent=2,
+            ensure_ascii=False,
+        )
+
+        handle.write("\n")
+
+    return report_path
+
+
 def harvest(
     source: str,
     base_url: str,
@@ -158,6 +214,10 @@ def harvest(
     max_pages: int | None,
     enrich_traits: bool,
 ) -> None:
+
+    started_at = datetime.now(
+        timezone.utc
+    )
 
     start = time.perf_counter()
 
@@ -171,6 +231,7 @@ def harvest(
     brapi = BrAPIClient(
         base_url=base_url,
     )
+
     trait_client = BrAPIClient(
         base_url=base_url,
         timeout=5,
@@ -254,21 +315,29 @@ def harvest(
             )
 
             # ----------------------------------------------------------
-            # Trait enrichment
+            # Optional trait enrichment
             # ----------------------------------------------------------
 
             traits: list[str] = []
 
             if (
                 enrich_traits
-                and capabilities.get("observations", False)
-                and capabilities.get("variables", False)
+                and capabilities.get(
+                    "observations",
+                    False,
+                )
+                and capabilities.get(
+                    "variables",
+                    False,
+                )
             ):
-                traits_result = trait_client.get_traits_for_study(
-                    study_id=study.source_id,
-                    page_size=5,
-                    max_pages=1,
-                    max_variables=10,
+                traits_result = (
+                    trait_client.get_traits_for_study(
+                        study_id=study.source_id,
+                        page_size=5,
+                        max_pages=1,
+                        max_variables=10,
+                    )
                 )
 
                 if traits_result is None:
@@ -279,7 +348,6 @@ def harvest(
 
                     if traits:
                         enriched_traits += 1
-
 
             study.traits = traits
 
@@ -334,6 +402,64 @@ def harvest(
 
     duration = time.perf_counter() - start
 
+    if (
+        rejected == 0
+        and failed_locations == 0
+        and trait_failures == 0
+    ):
+        status = "SUCCESS"
+
+    elif valid > 0:
+        status = "PARTIAL_SUCCESS"
+
+    else:
+        status = "FAILED"
+
+    finished_at = datetime.now(
+        timezone.utc
+    )
+
+    report = {
+        "source": source,
+        "endpoint": base_url,
+        "index": index_name,
+        "status": status,
+
+        "startedAt": (
+            started_at.isoformat()
+        ),
+        "finishedAt": (
+            finished_at.isoformat()
+        ),
+        "durationSeconds": round(
+            duration,
+            2,
+        ),
+
+        "configuration": {
+            "pageSize": page_size,
+            "maxPages": max_pages,
+            "traitEnrichmentEnabled": enrich_traits,
+        },
+
+        "capabilities": capabilities,
+
+        "recordsFetched": fetched,
+        "valid": valid,
+        "rejected": rejected,
+        "indexed": indexed,
+
+        "locationsEnriched": enriched_locations,
+        "locationFailures": failed_locations,
+
+        "studiesWithTraits": enriched_traits,
+        "traitFailures": trait_failures,
+    }
+
+    report_path = write_harvest_report(
+        report
+    )
+
     print()
     print("-" * 50)
     print(f"Records fetched     : {fetched}")
@@ -346,20 +472,8 @@ def harvest(
     print(f"Indexed             : {indexed}")
     print(f"Duration            : {duration:.2f} s")
     print("-" * 50)
-
-    if (
-        rejected == 0
-        and failed_locations == 0
-        and trait_failures == 0
-    ):
-        print("STATUS              : SUCCESS")
-
-    elif valid > 0:
-        print("STATUS              : PARTIAL_SUCCESS")
-
-    else:
-        print("STATUS              : FAILED")
-
+    print(f"STATUS              : {status}")
+    print(f"REPORT              : {report_path}")
     print()
 
 
@@ -399,9 +513,7 @@ def build_parser() -> argparse.ArgumentParser:
     harvest_parser.add_argument(
         "--base-url",
         required=True,
-        help=(
-            "BrAPI v2 base URL."
-        ),
+        help="BrAPI v2 base URL.",
     )
 
     harvest_parser.add_argument(
@@ -413,16 +525,6 @@ def build_parser() -> argparse.ArgumentParser:
             "per BrAPI page."
         ),
     )
-    
-    harvest_parser.add_argument(
-        "--enrich-traits",
-        action="store_true",
-        help=(
-            "Enable optional phenotype/trait enrichment. "
-            "Disabled by default because remote observation "
-            "endpoints may be slow."
-        ),
-    )
 
     harvest_parser.add_argument(
         "--max-pages",
@@ -431,6 +533,16 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Maximum number of study pages to harvest. "
             "Default: all available pages."
+        ),
+    )
+
+    harvest_parser.add_argument(
+        "--enrich-traits",
+        action="store_true",
+        help=(
+            "Enable optional phenotype/trait enrichment. "
+            "Disabled by default because remote observation "
+            "endpoints may be slow."
         ),
     )
 

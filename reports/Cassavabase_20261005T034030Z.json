@@ -1,0 +1,29 @@
+{
+  "source": "Cassavabase",
+  "endpoint": "https://cassavabase.org/brapi/v2",
+  "index": "plant-studies-real",
+  "status": "SUCCESS",
+  "startedAt": "2026-10-05T03:40:27.814173+00:00",
+  "finishedAt": "2026-10-05T03:40:30.323284+00:00",
+  "durationSeconds": 2.85,
+  "configuration": {
+    "pageSize": 2,
+    "maxPages": 1,
+    "traitEnrichmentEnabled": false
+  },
+  "capabilities": {
+    "studies": true,
+    "locations": true,
+    "traits": true,
+    "variables": true,
+    "observations": true
+  },
+  "recordsFetched": 2,
+  "valid": 2,
+  "rejected": 0,
+  "indexed": 2,
+  "locationsEnriched": 2,
+  "locationFailures": 0,
+  "studiesWithTraits": 0,
+  "traitFailures": 0
+}
