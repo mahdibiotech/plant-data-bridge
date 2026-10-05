@@ -1,0 +1,477 @@
+<div class="app-shell">
+
+  <header class="hero">
+    <div class="hero-content">
+
+      <div class="brand">
+        <div class="logo">🌱</div>
+
+        <div>
+          <h1>PlantDataBridge</h1>
+
+          <p>
+            Federated search across plant research data
+          </p>
+        </div>
+      </div>
+
+      <div class="architecture-label">
+        BrAPI → Elasticsearch → Spring Boot → Angular
+      </div>
+
+    </div>
+  </header>
+
+
+  <main>
+
+    <section class="search-panel">
+
+      <div class="search-title">
+        <div>
+          <h2>Explore plant studies</h2>
+
+          <p>
+            Search and filter harmonized studies from
+            federated BrAPI providers.
+          </p>
+        </div>
+      </div>
+
+
+      <div class="main-search">
+
+        <input
+          [(ngModel)]="query"
+          (keyup.enter)="search(0)"
+          placeholder="Search cassava, yield, disease resistance..."
+        />
+
+        <button
+          class="primary-button"
+          (click)="search(0)"
+        >
+          Search
+        </button>
+
+      </div>
+
+
+      <div class="filters">
+
+        <label>
+          <span>Source</span>
+
+          <select [(ngModel)]="source">
+            <option value="">All sources</option>
+
+            <option value="Cassavabase">
+              Cassavabase
+            </option>
+
+            <option value="BrAPITestServer">
+              BrAPI Test Server
+            </option>
+          </select>
+        </label>
+
+
+        <label>
+          <span>Crop</span>
+
+          <input
+            [(ngModel)]="crop"
+            placeholder="Cassava"
+          />
+        </label>
+
+
+        <label>
+          <span>Country</span>
+
+          <input
+            [(ngModel)]="country"
+            placeholder="Nigeria"
+          />
+        </label>
+
+
+        <label>
+          <span>Study type</span>
+
+          <input
+            [(ngModel)]="studyType"
+            placeholder="Advanced Yield Trial"
+          />
+        </label>
+
+
+        <label>
+          <span>Program</span>
+
+          <input
+            [(ngModel)]="program"
+            placeholder="IITA"
+          />
+        </label>
+
+      </div>
+
+
+      <div class="filter-actions">
+
+        <div class="sort-controls">
+
+          <select
+            [(ngModel)]="sort"
+            (change)="search(0)"
+          >
+            <option value="relevance">
+              Relevance
+            </option>
+
+            <option value="studyName">
+              Study name
+            </option>
+
+            <option value="source">
+              Source
+            </option>
+
+            <option value="country">
+              Country
+            </option>
+          </select>
+
+
+          <select
+            [(ngModel)]="order"
+            (change)="search(0)"
+          >
+            <option value="desc">
+              Descending
+            </option>
+
+            <option value="asc">
+              Ascending
+            </option>
+          </select>
+
+        </div>
+
+
+        <div class="buttons">
+
+          <button
+            class="secondary-button"
+            (click)="reset()"
+          >
+            Reset
+          </button>
+
+          <button
+            class="primary-button"
+            (click)="search(0)"
+          >
+            Apply filters
+          </button>
+
+        </div>
+
+      </div>
+
+    </section>
+
+
+    <section
+      class="status-panel"
+      *ngIf="loading"
+    >
+      <div class="spinner"></div>
+
+      <span>
+        Searching federated plant data...
+      </span>
+    </section>
+
+
+    <section
+      class="error-panel"
+      *ngIf="error"
+    >
+      {{ error }}
+    </section>
+
+
+    <ng-container
+      *ngIf="result && !loading"
+    >
+
+      <section class="result-summary">
+
+        <div>
+          <strong>
+            {{ result.total }}
+          </strong>
+
+          <span>
+            studies found
+          </span>
+        </div>
+
+
+        <div class="page-summary">
+          Page {{ result.page + 1 }}
+          of {{ result.totalPages || 1 }}
+        </div>
+
+      </section>
+
+
+      <section
+        class="empty-state"
+        *ngIf="result.results.length === 0"
+      >
+
+        <div class="empty-icon">
+          🌿
+        </div>
+
+        <h3>No studies found</h3>
+
+        <p>
+          Try removing some filters or using a broader
+          search query.
+        </p>
+
+      </section>
+
+
+      <section class="results">
+
+        <article
+          class="study-card"
+          *ngFor="let hit of result.results"
+        >
+
+          <div class="card-header">
+
+            <div>
+
+              <div class="source-badge">
+                {{ hit.source.source }}
+              </div>
+
+              <h3>
+                {{ hit.source.study_name }}
+              </h3>
+
+            </div>
+
+
+            <div
+              class="score"
+              *ngIf="hit.score !== null"
+            >
+              score
+              {{ hit.score | number:'1.2-2' }}
+            </div>
+
+          </div>
+
+
+          <p
+            class="description"
+            *ngIf="hit.source.study_description"
+          >
+            {{ hit.source.study_description }}
+          </p>
+
+
+          <div class="metadata-grid">
+
+            <div>
+              <span class="label">
+                Crop
+              </span>
+
+              <strong>
+                {{
+                  hit.source.common_crop_name
+                  || 'Not specified'
+                }}
+              </strong>
+            </div>
+
+
+            <div>
+              <span class="label">
+                Country
+              </span>
+
+              <strong>
+                {{
+                  hit.source.country
+                  || 'Not specified'
+                }}
+              </strong>
+            </div>
+
+
+            <div>
+              <span class="label">
+                Location
+              </span>
+
+              <strong>
+                {{
+                  hit.source.location_name
+                  || 'Not specified'
+                }}
+              </strong>
+            </div>
+
+
+            <div>
+              <span class="label">
+                Program
+              </span>
+
+              <strong>
+                {{
+                  hit.source.program_name
+                  || 'Not specified'
+                }}
+              </strong>
+            </div>
+
+
+            <div>
+              <span class="label">
+                Study type
+              </span>
+
+              <strong>
+                {{
+                  hit.source.study_type
+                  || 'Not specified'
+                }}
+              </strong>
+            </div>
+
+
+            <div>
+              <span class="label">
+                Trial
+              </span>
+
+              <strong>
+                {{
+                  hit.source.trial_name
+                  || 'Not specified'
+                }}
+              </strong>
+            </div>
+
+          </div>
+
+
+          <div
+            class="trait-list"
+            *ngIf="hit.source.traits?.length"
+          >
+
+            <span
+              class="trait"
+              *ngFor="let trait of hit.source.traits"
+            >
+              {{ trait }}
+            </span>
+
+          </div>
+
+
+          <div
+            class="coordinates"
+            *ngIf="
+              hasCoordinates(
+                hit.source.latitude,
+                hit.source.longitude
+              )
+            "
+          >
+            📍
+            {{ hit.source.latitude }},
+            {{ hit.source.longitude }}
+          </div>
+
+
+          <footer class="card-footer">
+
+            <code>
+              {{ hit.id }}
+            </code>
+
+            <span
+              *ngIf="hit.source.seasons?.length"
+            >
+              Season:
+              {{ hit.source.seasons.join(', ') }}
+            </span>
+
+          </footer>
+
+        </article>
+
+      </section>
+
+
+      <nav
+        class="pagination"
+        *ngIf="result.totalPages > 1"
+      >
+
+        <button
+          class="secondary-button"
+          [disabled]="page === 0"
+          (click)="previousPage()"
+        >
+          ← Previous
+        </button>
+
+
+        <span>
+          {{ page + 1 }} / {{ result.totalPages }}
+        </span>
+
+
+        <button
+          class="secondary-button"
+          [disabled]="
+            page + 1 >= result.totalPages
+          "
+          (click)="nextPage()"
+        >
+          Next →
+        </button>
+
+      </nav>
+
+    </ng-container>
+
+  </main>
+
+
+  <footer class="main-footer">
+
+    <span>
+      PlantDataBridge
+    </span>
+
+    <span>
+      Federated BrAPI scientific data demonstrator
+    </span>
+
+  </footer>
+
+</div>
