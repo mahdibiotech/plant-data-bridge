@@ -8,8 +8,8 @@ import time
 from pydantic import ValidationError
 
 from .brapi_client import BrAPIClient
-from .indexer import get_client, ensure_index, bulk_index
-from .transform import normalize_study, enrich_study
+from .indexer import bulk_index, ensure_index, get_client
+from .transform import enrich_study, normalize_study
 
 
 logging.basicConfig(
@@ -113,11 +113,50 @@ def demo_index() -> None:
     )
 
 
+def discover_capabilities(
+    brapi: BrAPIClient,
+) -> dict[str, bool]:
+    try:
+        capabilities = brapi.get_capabilities()
+
+        print("Capabilities")
+        print(f"  studies      : {capabilities['studies']}")
+        print(f"  locations    : {capabilities['locations']}")
+        print(f"  traits       : {capabilities['traits']}")
+        print(f"  variables    : {capabilities['variables']}")
+        print(f"  observations : {capabilities['observations']}")
+        print()
+
+        return capabilities
+
+    except RuntimeError as exc:
+        logger.warning(
+            "Capability discovery failed: %s",
+            exc,
+        )
+
+        fallback = {
+            "studies": True,
+            "locations": True,
+            "traits": False,
+            "variables": False,
+            "observations": False,
+        }
+
+        print("Capabilities")
+        print("  serverinfo unavailable")
+        print("  using conservative fallback")
+        print()
+
+        return fallback
+
+
 def harvest(
     source: str,
     base_url: str,
     page_size: int,
     max_pages: int | None,
+    enrich_traits: bool,
 ) -> None:
 
     start = time.perf_counter()
@@ -132,42 +171,34 @@ def harvest(
     brapi = BrAPIClient(
         base_url=base_url,
     )
+    trait_client = BrAPIClient(
+        base_url=base_url,
+        timeout=5,
+        max_retries=0,
+    )
 
-    # ---------------------------------------------------------
-    # Capability discovery
-    # ---------------------------------------------------------
+    capabilities = discover_capabilities(
+        brapi
+    )
 
-    try:
-        capabilities = brapi.get_capabilities()
-
-        print("Capabilities")
-        print(f"  studies      : {capabilities['studies']}")
-        print(f"  locations    : {capabilities['locations']}")
-        print(f"  traits       : {capabilities['traits']}")
-        print(f"  variables    : {capabilities['variables']}")
-        print(f"  observations : {capabilities['observations']}")
-        print()
-
-    except RuntimeError as exc:
-
-        logger.warning(
-            "Capability discovery failed: %s",
-            exc,
+    if not capabilities.get(
+        "studies",
+        True,
+    ):
+        raise RuntimeError(
+            "The BrAPI source does not advertise "
+            "study support."
         )
-
-        capabilities = {
-            "studies": True,
-            "locations": True,
-            "traits": False,
-            "variables": False,
-            "observations": False,
-        }
 
     fetched = 0
     valid = 0
     rejected = 0
+
     enriched_locations = 0
     failed_locations = 0
+
+    enriched_traits = 0
+    trait_failures = 0
 
     documents: list[dict] = []
 
@@ -185,15 +216,18 @@ def harvest(
                 source_endpoint=base_url,
             )
 
-            location = None
+            # ----------------------------------------------------------
+            # Geographic enrichment
+            # ----------------------------------------------------------
 
-            # -------------------------------------------------
-            # Location enrichment only if supported
-            # -------------------------------------------------
+            location = None
 
             if (
                 study.location_id
-                and capabilities.get("locations", False)
+                and capabilities.get(
+                    "locations",
+                    False,
+                )
             ):
                 try:
                     location = brapi.get_location(
@@ -204,7 +238,6 @@ def harvest(
                         enriched_locations += 1
 
                 except RuntimeError as exc:
-
                     failed_locations += 1
 
                     logger.warning(
@@ -219,6 +252,36 @@ def harvest(
                 location=location,
                 observation_variables=None,
             )
+
+            # ----------------------------------------------------------
+            # Trait enrichment
+            # ----------------------------------------------------------
+
+            traits: list[str] = []
+
+            if (
+                enrich_traits
+                and capabilities.get("observations", False)
+                and capabilities.get("variables", False)
+            ):
+                traits_result = trait_client.get_traits_for_study(
+                    study_id=study.source_id,
+                    page_size=5,
+                    max_pages=1,
+                    max_variables=10,
+                )
+
+                if traits_result is None:
+                    trait_failures += 1
+
+                else:
+                    traits = traits_result
+
+                    if traits:
+                        enriched_traits += 1
+
+
+            study.traits = traits
 
             documents.append(
                 study.model_dump(
@@ -278,14 +341,22 @@ def harvest(
     print(f"Rejected            : {rejected}")
     print(f"Locations enriched  : {enriched_locations}")
     print(f"Location failures   : {failed_locations}")
+    print(f"Studies with traits : {enriched_traits}")
+    print(f"Trait failures      : {trait_failures}")
     print(f"Indexed             : {indexed}")
     print(f"Duration            : {duration:.2f} s")
     print("-" * 50)
 
-    if rejected == 0 and failed_locations == 0:
+    if (
+        rejected == 0
+        and failed_locations == 0
+        and trait_failures == 0
+    ):
         print("STATUS              : SUCCESS")
+
     elif valid > 0:
         print("STATUS              : PARTIAL_SUCCESS")
+
     else:
         print("STATUS              : FAILED")
 
@@ -297,8 +368,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="plantbridge",
         description=(
-            "Federated BrAPI harvesting and "
-            "Elasticsearch indexing prototype."
+            "Federated BrAPI harvesting, enrichment "
+            "and Elasticsearch indexing prototype."
         ),
     )
 
@@ -329,8 +400,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--base-url",
         required=True,
         help=(
-            "BrAPI V2 base URL, for example "
-            "https://cassavabase.org/brapi/v2"
+            "BrAPI v2 base URL."
         ),
     )
 
@@ -338,7 +408,20 @@ def build_parser() -> argparse.ArgumentParser:
         "--page-size",
         type=int,
         default=100,
-        help="Number of BrAPI records requested per page.",
+        help=(
+            "Number of study records requested "
+            "per BrAPI page."
+        ),
+    )
+    
+    harvest_parser.add_argument(
+        "--enrich-traits",
+        action="store_true",
+        help=(
+            "Enable optional phenotype/trait enrichment. "
+            "Disabled by default because remote observation "
+            "endpoints may be slow."
+        ),
     )
 
     harvest_parser.add_argument(
@@ -346,7 +429,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=None,
         help=(
-            "Maximum number of BrAPI pages to harvest. "
+            "Maximum number of study pages to harvest. "
             "Default: all available pages."
         ),
     )
@@ -368,6 +451,7 @@ def main() -> None:
             base_url=args.base_url,
             page_size=args.page_size,
             max_pages=args.max_pages,
+            enrich_traits=args.enrich_traits,
         )
 
     else:
